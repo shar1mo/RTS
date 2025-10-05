@@ -25,9 +25,11 @@ char    *progname = "prodcons";
 
 int main ()
 {
+  pthread_t t_producer;
+  pthread_t t_consumer;
   setvbuf (stdout, NULL, _IOLBF, 0);
-  pthread_create (NULL, NULL, consumer, NULL);
-  pthread_create (NULL, NULL, producer, NULL);
+  pthread_create (&t_consumer, NULL, consumer, NULL);
+  pthread_create (&t_producer, NULL, producer, NULL);
   sleep (20);     // Позволим потокам выполнить "работу"
   printf ("%s:  main, exiting\n", progname);
   return 0;

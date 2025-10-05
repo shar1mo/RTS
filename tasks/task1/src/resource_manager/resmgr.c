@@ -1,20 +1,25 @@
 /*
- *  Менеджер ресурсов (Linux версия, скелет для учебного задания)
+ *  Менеджер ресурсов (Linux версия, расширенная реализация)
  *
- *  В ОСРВ роль менеджера ресурсов выполняет resmgr с функциями connect/I/O.
- *  На Linux аналогичное поведение можно смоделировать сервером на UNIX
- *  domain sockets: accept() соответствует open(), recv() — read(), send() — write().
+ *  Моделируется поведение менеджера ресурсов ОСРВ:
+ *  - UNIX domain socket как точка подключения
+ *  - отдельный поток на клиента
+ *  - простейший протокол команд:
+ *      WRITE <text>  — записать данные в буфер
+ *      READ          — прочитать содержимое буфера
+ *      CLEAR         — очистить буфер
+ *      STATUS        — узнать длину и состояние буфера
+ *      EXIT / QUIT   — закрыть соединение
  *
- *  Этот скелет поднимает сервер по пути сокета и обслуживает клиентов в отдельных
- *  потоках. По умолчанию реализовано простое эхо (возврат присланных данных).
- *  СТУДЕНТУ: расширьте протокол, добавьте состояния, буфер устройства, обработку
- *  команд, права доступа и т.д.
+ *  Один клиент может "захватить" устройство для записи (эксклюзивный доступ).
+ *  Остальные смогут только читать.
  */
-
+#define _POSIX_C_SOURCE 199309L
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -27,11 +32,20 @@ static const char *progname = "example";
 static int optv = 0;
 static int listen_fd = -1;
 
+// >>> добавлено: состояние "устройства"
+#define DEVICE_BUFSIZE 4096
+static char device_buf[DEVICE_BUFSIZE];
+static size_t device_len = 0;
+static pthread_mutex_t device_lock = PTHREAD_MUTEX_INITIALIZER;
+static int writer_active = 0; // 0 — нет владельца, иначе fd клиента
+
+// объявления
 static void options(int argc, char *argv[]);
 static void install_signals(void);
 static void on_signal(int signo);
 static void *client_thread(void *arg);
 
+// ----------------------------------------------------------
 int main(int argc, char *argv[])
 {
   setvbuf(stdout, NULL, _IOLBF, 0);
@@ -39,7 +53,6 @@ int main(int argc, char *argv[])
   options(argc, argv);
   install_signals();
 
-  // Создаём UNIX-сокет и биндимся на путь
   listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (listen_fd == -1) {
     perror("socket");
@@ -50,8 +63,6 @@ int main(int argc, char *argv[])
   memset(&addr, 0, sizeof(addr));
   addr.sun_family = AF_UNIX;
   strncpy(addr.sun_path, EXAMPLE_SOCK_PATH, sizeof(addr.sun_path) - 1);
-
-  // Удалим старый сокетный файл, если остался после прошлых запусков
   unlink(EXAMPLE_SOCK_PATH);
 
   if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
@@ -68,23 +79,21 @@ int main(int argc, char *argv[])
   }
 
   printf("%s: listening on %s\n", progname, EXAMPLE_SOCK_PATH);
-  printf("Подключитесь клиентом (например: `nc -U %s`) и отправьте данные.\n", EXAMPLE_SOCK_PATH);
+  printf("Подключитесь клиентом (например: `nc -U %s`)\n", EXAMPLE_SOCK_PATH);
+  printf("Доступные команды: WRITE <txt>, READ, CLEAR, STATUS, EXIT.\n");
 
-  // Основной цикл accept: аналог io_open
   while (1) {
     int client_fd = accept(listen_fd, NULL, NULL);
     if (client_fd == -1) {
-      if (errno == EINTR) continue; // прервано сигналом — пробуем снова
+      if (errno == EINTR) continue;
       perror("accept");
       break;
     }
 
-    if (optv) {
+    if (optv)
       printf("%s: io_open — новое подключение (fd=%d)\n", progname, client_fd);
-    }
 
     pthread_t th;
-    // Запускаем поток для клиента; поток сам закроет fd
     if (pthread_create(&th, NULL, client_thread, (void *)(long)client_fd) != 0) {
       perror("pthread_create");
       close(client_fd);
@@ -98,52 +107,95 @@ int main(int argc, char *argv[])
   return EXIT_SUCCESS;
 }
 
-// Обработчик клиента: recv() как io_read, send() как io_write (эхо)
+// ----------------------------------------------------------
+// Клиентский поток: простейший протокол команд
 static void *client_thread(void *arg)
 {
   int fd = (int)(long)arg;
   char buf[1024];
+  ssize_t n;
 
-  // СТУДЕНТУ: здесь можно выполнять аутентификацию/инициализацию OCB
-  // (контекст операции), вести учёт "позиции файла", симулировать флаги и пр.
+  while ((n = recv(fd, buf, sizeof(buf) - 1, 0)) > 0) {
+    buf[n] = '\0';
 
-  for (;;) {
-    ssize_t n = recv(fd, buf, sizeof(buf), 0);
-    if (n == 0) {
-      if (optv) printf("%s: клиент закрыл соединение (fd=%d)\n", progname, fd);
+    // уберём перевод строки
+    char *newline = strchr(buf, '\n');
+    if (newline) *newline = '\0';
+
+    if (optv) printf("%s: команда от fd=%d: '%s'\n", progname, fd, buf);
+
+    // команда EXIT / QUIT
+    if (strcasecmp(buf, "EXIT") == 0 || strcasecmp(buf, "QUIT") == 0) {
+      send(fd, "OK: bye\n", 8, 0);
       break;
     }
-    if (n < 0) {
-      if (errno == EINTR) continue;
-      perror("recv");
-      break;
+    // команда STATUS
+    else if (strcasecmp(buf, "STATUS") == 0) {
+      pthread_mutex_lock(&device_lock);
+      char msg[128];
+      snprintf(msg, sizeof(msg),
+               "BUF_LEN=%zu, WRITER=%s\n",
+               device_len, (writer_active == 0 ? "none" : "active"));
+      pthread_mutex_unlock(&device_lock);
+      send(fd, msg, strlen(msg), 0);
     }
-
-    if (optv) {
-      printf("%s: io_read — %zd байт\n", progname, n);
+    // команда READ
+    else if (strcasecmp(buf, "READ") == 0) {
+      pthread_mutex_lock(&device_lock);
+      if (device_len == 0)
+        send(fd, "(empty)\n", 8, 0);
+      else
+        send(fd, device_buf, device_len, 0);
+      pthread_mutex_unlock(&device_lock);
     }
+    // команда CLEAR
+    else if (strcasecmp(buf, "CLEAR") == 0) {
+      pthread_mutex_lock(&device_lock);
+      device_len = 0;
+      device_buf[0] = '\0';
+      pthread_mutex_unlock(&device_lock);
+      send(fd, "OK: buffer cleared\n", 19, 0);
+    }
+    // команда WRITE <text>
+    else if (strncasecmp(buf, "WRITE ", 6) == 0) {
+      const char *data = buf + 6;
+      pthread_mutex_lock(&device_lock);
 
-    // Простое эхо. СТУДЕНТУ: заменить на логику записи в "устройство".
-    ssize_t sent = 0;
-    while (sent < n) {
-      ssize_t m = send(fd, buf + sent, (size_t)(n - sent), 0);
-      if (m < 0) {
-        if (errno == EINTR) continue;
-        perror("send");
-        break;
+      if (writer_active != 0 && writer_active != fd) {
+        pthread_mutex_unlock(&device_lock);
+        send(fd, "ERR: device busy\n", 17, 0);
+        continue;
       }
-      sent += m;
-    }
 
-    if (optv) {
-      printf("%s: io_write — %zd байт\n", progname, sent);
+      writer_active = fd; // захватываем устройство
+
+      size_t len = strlen(data);
+      if (len + device_len >= DEVICE_BUFSIZE) len = DEVICE_BUFSIZE - device_len - 1;
+      memcpy(device_buf + device_len, data, len);
+      device_len += len;
+      device_buf[device_len] = '\0';
+
+      pthread_mutex_unlock(&device_lock);
+      send(fd, "OK: written\n", 12, 0);
+    }
+    else {
+      const char *msg = "ERR: unknown command\n";
+      send(fd, msg, strlen(msg), 0);
     }
   }
+
+  if (optv)
+    printf("%s: клиент отключён (fd=%d)\n", progname, fd);
+
+  pthread_mutex_lock(&device_lock);
+  if (writer_active == fd) writer_active = 0;
+  pthread_mutex_unlock(&device_lock);
 
   close(fd);
   return NULL;
 }
 
+// ----------------------------------------------------------
 static void options(int argc, char *argv[])
 {
   int opt;
@@ -157,6 +209,7 @@ static void options(int argc, char *argv[])
   }
 }
 
+// ----------------------------------------------------------
 static void install_signals(void)
 {
   struct sigaction sa;

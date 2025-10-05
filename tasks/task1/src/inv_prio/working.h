@@ -1,3 +1,6 @@
+#ifndef WORKING_H
+#define WORKING_H
+
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -22,3 +25,8 @@ void working(int process_id);
 void *server(void *arg);   // низкий приоритет: удерживает мьютекс ресурса
 void *t1(void *arg);       // средний приоритет: CPU-bound
 void *t2(void *arg);       // высокий приоритет: ждёт мьютекс
+
+// Новая функция для проверки поддержки наследования приоритетов
+int check_prio_inherit_support(void);
+
+#endif

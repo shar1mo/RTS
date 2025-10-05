@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 199309L
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,41 +6,47 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-static volatile unsigned counter = 0;
+static volatile sig_atomic_t counter = 0;
+static volatile sig_atomic_t messages_printed = 0;
 
 static void on_alarm(int signo) {
   (void)signo;
   if (++counter == 100) {
     counter = 0;
+    messages_printed++;
     write(STDOUT_FILENO, "100 events\n", 11);
   }
 }
 
 int main(void) {
   struct sigaction sa;
+  
   memset(&sa, 0, sizeof(sa));
   sa.sa_handler = on_alarm;
   sigemptyset(&sa.sa_mask);
-  sigaction(SIGALRM, &sa, NULL);
+  if (sigaction(SIGALRM, &sa, NULL) == -1) {
+    perror("sigaction");
+    return EXIT_FAILURE;
+  }
 
   struct itimerval itv;
-  // период 10 мс (для демонстрации). При необходимости подберите значения.
   itv.it_interval.tv_sec = 0;
-  itv.it_interval.tv_usec = 10000; // 10ms
-  itv.it_value = itv.it_interval;  // стартовое значение
+  itv.it_interval.tv_usec = 10000;
+  itv.it_value = itv.it_interval;
   if (setitimer(ITIMER_REAL, &itv, NULL) == -1) {
     perror("setitimer");
     return EXIT_FAILURE;
   }
 
-  // Ждём 10 сообщений по 100 событий => 1000 тиков ~ 10 секунд
-  for (int i = 0; i < 10; ++i) {
-    pause(); // просыпаемся по любому сигналу
-    // on_alarm пишет каждые 100 тиков, так что здесь просто ждём времени
+  printf("timer started. waiting for 10 messages...\n");
+  
+  while (messages_printed < 10) {
+    pause();
   }
 
-  // Остановим таймер
   memset(&itv, 0, sizeof(itv));
   setitimer(ITIMER_REAL, &itv, NULL);
+  
+  printf("done. received 10 messages.\n");
   return EXIT_SUCCESS;
 }

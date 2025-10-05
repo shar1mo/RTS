@@ -15,12 +15,15 @@ volatile int     var2;
 void    *update_thread (void *);
 char    *progname = "nomutex";
 
+pthread_mutex_t var_mutex;
+
 int main ()
 {
     pthread_t           threadID [NumThreads];  // хранит ID потоков
     pthread_attr_t      attrib;                 // атрибуты планирования
     struct sched_param  param;                  // для установки приоритета
     int                 i, policy;
+    pthread_mutex_init(&var_mutex, NULL);
     setvbuf (stdout, NULL, _IOLBF, 0);
     var1 = var2 = 0;        /* инициализация известных */
     printf ("%s:  starting; creating threads\n", progname);

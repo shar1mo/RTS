@@ -8,21 +8,49 @@
 
 static pthread_mutex_t resource_mutex;
 
+// Функция для проверки поддержки наследования приоритетов
+int check_prio_inherit_support(void)
+{
+#ifdef PTHREAD_PRIO_INHERIT
+  printf("Система поддерживает PTHREAD_PRIO_INHERIT\n");
+  return 1;
+#else
+  printf("Система НЕ поддерживает PTHREAD_PRIO_INHERIT\n");
+  return 0;
+#endif
+}
+
 int init_resource_mutex(int enable_prio_inherit)
 {
   pthread_mutexattr_t attr;
   if (pthread_mutexattr_init(&attr) != 0) return -1;
+  
 #ifdef PTHREAD_PRIO_INHERIT
   if (enable_prio_inherit) {
-    // Попробуем включить наследование приоритета, если система поддерживает
-    pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT);
+    printf("Включение наследования приоритетов для мьютекса...\n");
+    if (pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT) != 0) {
+      perror("pthread_mutexattr_setprotocol");
+      pthread_mutexattr_destroy(&attr);
+      return -1;
+    }
+    printf("Наследование приоритетов успешно включено\n");
   }
 #else
+  if (enable_prio_inherit) {
+    printf("Система не поддерживает PTHREAD_PRIO_INHERIT\n");
+  }
   (void)enable_prio_inherit;
 #endif
+
   int rc = pthread_mutex_init(&resource_mutex, &attr);
   pthread_mutexattr_destroy(&attr);
-  return rc == 0 ? 0 : -1;
+  
+  if (rc != 0) {
+    perror("pthread_mutex_init");
+    return -1;
+  }
+  
+  return 0;
 }
 
 static void busy_ms(int ms)
