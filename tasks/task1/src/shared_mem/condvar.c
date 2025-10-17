@@ -83,7 +83,7 @@
             printf ("%s:  transit 1 -> 2\n", progname);
             state = 2;
          }else {
-            printf ("%s:  transit 2 -> 3\n", progname);
+            printf ("%s:  transit 1 -> 3\n", progname);
             state = 3;
          }
 

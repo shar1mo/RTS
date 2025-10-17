@@ -32,7 +32,6 @@ static const char *progname = "example";
 static int optv = 0;
 static int listen_fd = -1;
 
-// >>> добавлено: состояние "устройства"
 #define DEVICE_BUFSIZE 4096
 static char device_buf[DEVICE_BUFSIZE];
 static size_t device_len = 0;
@@ -45,7 +44,6 @@ static void install_signals(void);
 static void on_signal(int signo);
 static void *client_thread(void *arg);
 
-// ----------------------------------------------------------
 int main(int argc, char *argv[])
 {
   setvbuf(stdout, NULL, _IOLBF, 0);
@@ -107,7 +105,6 @@ int main(int argc, char *argv[])
   return EXIT_SUCCESS;
 }
 
-// ----------------------------------------------------------
 // Клиентский поток: простейший протокол команд
 static void *client_thread(void *arg)
 {
@@ -195,7 +192,6 @@ static void *client_thread(void *arg)
   return NULL;
 }
 
-// ----------------------------------------------------------
 static void options(int argc, char *argv[])
 {
   int opt;
@@ -209,7 +205,6 @@ static void options(int argc, char *argv[])
   }
 }
 
-// ----------------------------------------------------------
 static void install_signals(void)
 {
   struct sigaction sa;
