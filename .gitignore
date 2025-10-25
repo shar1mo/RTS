@@ -53,4 +53,5 @@ Mkfile.old
 dkms.conf
 
 task/task1/bin
+task/task2/bin
 .vscode

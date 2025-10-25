@@ -18,6 +18,7 @@ static volatile sig_atomic_t got_sigusr1 = 0;
 static volatile sig_atomic_t got_sigusr2 = 0;
 // Для демонстрации: SIGKILL невозможно обработать
 static volatile sig_atomic_t got_sigkill = 0; // никогда не будет установлен
+static volatile sig_atomic_t got_sigpipe = 0;
 
 static struct termios orig_termios;
 
@@ -40,6 +41,7 @@ static void handle_sigint(int signo)  { (void)signo; got_sigint = 1; }
 static void handle_sigterm(int signo) { (void)signo; got_sigterm = 1; }
 static void handle_sigusr1(int signo) { (void)signo; got_sigusr1 = 1; }
 static void handle_sigusr2(int signo) { (void)signo; got_sigusr2 = 1; }
+static void handle_sigpipe(int signo) { (void)signo; got_sigpipe = 1; }
 
 // обработчик SIGKILL — добавить нельзя, но оставим комментарий
 // static void handle_sigkill(int signo) { got_sigkill = 1; } // не работает
@@ -63,6 +65,7 @@ int main(void) {
   sa.sa_handler = handle_sigterm; sigaction(SIGTERM, &sa, NULL);
   sa.sa_handler = handle_sigusr1; sigaction(SIGUSR1, &sa, NULL);
   sa.sa_handler = handle_sigusr2; sigaction(SIGUSR2, &sa, NULL);
+  sa.sa_handler = handle_sigpipe; sigaction(SIGPIPE, &sa, NULL);
   // SIGKILL установить нельзя — вызовет ошибку:
   // sigaction(SIGKILL, &sa, NULL); // нельзя
 
@@ -73,6 +76,7 @@ int main(void) {
     if (got_sigterm) { got_sigterm = 0; printf("%s: получен SIGTERM\n", progname); }
     if (got_sigusr1) { got_sigusr1 = 0; printf("%s: получен SIGUSR1\n", progname); }
     if (got_sigusr2) { got_sigusr2 = 0; printf("%s: получен SIGUSR2\n", progname); }
+    if (got_sigpipe) { got_sigpipe = 0; printf("%s: получен SIGPIPE\n", progname); }
 
     // Неблокирующее чтение клавиатуры
     char ch;
